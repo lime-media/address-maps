@@ -132,6 +132,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("workdir")
     ap.add_argument("--report", default=None, help="write a markdown report here")
+    ap.add_argument("--base-url", default=None,
+                    help="Pages base URL, so the report can list the map links")
     a = ap.parse_args()
 
     files = sorted(glob.glob(os.path.join(a.workdir, "*", "*_addresses_final.csv")))
@@ -171,8 +173,24 @@ def main():
         out.append("")
 
     if not bad:
-        out.append("Every market passed. The maps are live at the URLs above; the "
-                   "embeds in Google Sites pick up the new data automatically.")
+        out.append("Every market passed.")
+
+    if a.base_url:
+        base = a.base_url if a.base_url.endswith("/") else a.base_url + "/"
+        out.append("")
+        out.append("## Map links")
+        out.append("")
+        if bad:
+            out.append("Nothing was republished this run, so these are the maps as "
+                       "they already were:")
+        else:
+            out.append("Live in a minute or two. These addresses never change, so an "
+                       "embed in Google Sites only needs setting up once:")
+        out.append("")
+        for r in results:
+            slug = r["market"].lower().replace("_", "-")
+            note = " — failed this run, showing older data" if r["fail"] else ""
+            out.append(f"- [{r['market']}]({base}{slug}/) — {base}{slug}/{note}")
 
     text = "\n".join(out)
     print(text)
