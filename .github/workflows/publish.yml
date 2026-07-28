@@ -1,0 +1,97 @@
+name: Publish address maps
+
+# Fires when someone adds or replaces a spreadsheet in inbox/. Also runnable by
+# hand from the Actions tab, which is the way to re-run after fixing something.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'inbox/**'
+      - 'pipeline/**'
+      - '.github/workflows/publish.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One publish at a time. A second upload while the first is running waits its
+# turn instead of racing it -- but don't cancel the first, because a half-done
+# deploy is worse than a queued one.
+concurrency:
+  group: publish-address-maps
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Geocoder checkpoints survive between runs, so a large market that timed
+      # out resumes instead of starting from zero. Keyed on the inbox contents.
+      - uses: actions/cache@v4
+        with:
+          path: work
+          key: geocode-${{ hashFiles('inbox/**') }}
+          restore-keys: geocode-
+
+      - name: Build every market
+        env:
+          # Only used when a tab's column layout isn't recognized. Absent, such a
+          # tab is reported and skipped rather than failing the run.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python3 pipeline/publish.py
+
+      # The gate. Non-zero exit here means nothing is deployed and the currently
+      # live maps stay exactly as they are.
+      - name: Check before publishing
+        id: check
+        run: python3 pipeline/validate.py work/ --report report.md
+
+      # Runs even on failure, so the person who uploaded sees why in plain English
+      # on the run page rather than having to read a log.
+      - name: Write the summary
+        if: always()
+        run: cat report.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+
+      # If a layout was learned this run, surface it. schemas.json needs
+      # committing so the next run doesn't pay to learn the same thing again.
+      - name: Note any newly learned layout
+        if: always()
+        run: |
+          if ! git diff --quiet -- pipeline/schemas.json; then
+            {
+              echo ""
+              echo "### A new column layout was learned"
+              echo ""
+              echo "\`pipeline/schemas.json\` changed during this run. Commit it so"
+              echo "the layout is recognized directly next time:"
+              echo ""
+              echo '```diff'
+              git diff -- pipeline/schemas.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
