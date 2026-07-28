@@ -32,7 +32,29 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
+
+      # Say plainly what is missing, before anything can fail obscurely on it.
+      - name: Check the repo has what it needs
+        run: |
+          missing=0
+          for f in requirements.txt pipeline/publish.py pipeline/validate.py; do
+            [ -f "$f" ] || { echo "MISSING: $f"; missing=1; }
+          done
+          if ! ls inbox/*.xlsx inbox/*.xlsm inbox/*.csv >/dev/null 2>&1; then
+            echo "MISSING: no spreadsheet in inbox/"
+            missing=1
+          fi
+          if [ "$missing" = "1" ]; then
+            echo ""
+            echo "The repo is incomplete. What is actually here:"
+            ls -la
+            echo ""
+            echo "Upload the pipeline folder, the inbox folder, and"
+            echo "requirements.txt via Code -> Add file -> Upload files."
+            echo "Re-running this workflow will not add them."
+            exit 1
+          fi
+          echo "All present."
 
       - run: pip install -r requirements.txt
 
@@ -55,7 +77,10 @@ jobs:
       # live maps stay exactly as they are.
       - name: Check before publishing
         id: check
-        run: python3 pipeline/validate.py work/ --report report.md
+        run: |
+          # project-pages URL: https://<owner>.github.io/<repo>/
+          BASE="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/"
+          python3 pipeline/validate.py work/ --report report.md --base-url "$BASE"
 
       # Runs even on failure, so the person who uploaded sees why in plain English
       # on the run page rather than having to read a log.
