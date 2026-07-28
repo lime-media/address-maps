@@ -1,0 +1,22 @@
+{
+  "_comment": "Column layouts this pipeline has learned. Built-in schemas (raw AT&T, Alloy RG, F37) live in clean_addresses.py and always win. Entries here are checked next, most-specific first, then the generic fallback. resolve_schema.py appends here when it meets a layout nothing recognizes, so each new format costs one API call ever and is deterministic afterward. Safe to hand-edit; safe to delete an entry to force relearning.",
+  "version": 1,
+  "layouts": [
+    {
+      "name": "Alloy RG, space-separated headers",
+      "fingerprint": ["T Address", "T City", "T State", "T Zip Code"],
+      "map": {
+        "id": "T Unique Id",
+        "street": "T Address",
+        "unit": null,
+        "city": "T City",
+        "state": "T State",
+        "zip": "T Zip Code",
+        "lat": "T Lat",
+        "lon": "T Lon"
+      },
+      "added": "2026-07-28",
+      "source": "verified by hand against 8_26_NG_OOF_Maps___Addresses.xlsx"
+    }
+  ]
+}
