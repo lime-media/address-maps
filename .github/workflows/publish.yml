@@ -116,6 +116,16 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Crawling is allowed so the noindex meta tag in each map can be read --
+      # that is what actually keeps them out of results. status.json cannot carry
+      # a meta tag, so it is disallowed outright.
+      - name: Write robots.txt
+        run: |
+          cat > site/robots.txt <<'EOF'
+          User-agent: *
+          Disallow: /status.json
+          EOF
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
