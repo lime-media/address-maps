@@ -91,10 +91,15 @@ SKELETON = r"""<!DOCTYPE html>
   ul.b li:before{content:"\25A0";color:var(--teal);margin-right:7px;font-size:10px}
   #foot{padding:12px 16px;color:var(--muted);font-size:11.5px;
     border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
-  #navtoggle{position:absolute;top:12px;left:12px;z-index:900;background:var(--navy);
+  /* Sits at the sidebar's top-right while the panel is open, so it never covers
+     the market name, and slides out to the top-left corner when collapsed. */
+  #navtoggle{position:absolute;top:12px;left:292px;z-index:900;background:var(--navy);
     color:#fff;border:1px solid var(--line);border-radius:7px;padding:8px 12px;
-    font-size:12.5px;font-weight:600;cursor:pointer}
+    font-size:12.5px;font-weight:600;cursor:pointer;transition:left .26s ease}
+  #app.nav-collapsed ~ #navtoggle{left:12px}
   #navtoggle:hover{border-color:var(--teal)}
+  /* keep a long title from running underneath the button */
+  #side .sec:first-child{padding-right:56px}
   #busy{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:900;
     background:var(--navy);border:1px solid var(--teal);border-radius:7px;
     padding:7px 15px;font-size:12.5px;display:none}
@@ -129,7 +134,7 @@ SKELETON = r"""<!DOCTYPE html>
   </div>
   <div id="map"></div>
 </div>
-<button id="navtoggle">&#10005; Close</button>
+<button id="navtoggle" title="Hide the ZIP list">&#10005;</button>
 <div id="busy">Updating&hellip;</div>
 
 <script>
@@ -311,7 +316,8 @@ D.notes.forEach(t => { const li = document.createElement('li'); li.textContent =
 const app = document.getElementById('app'), nav = document.getElementById('navtoggle');
 nav.onclick = () => {
   const c = app.classList.toggle('nav-collapsed');
-  nav.innerHTML = c ? '\u2630 Layers' : '\u2715 Close';
+  nav.innerHTML = c ? '\u2630 Layers' : '\u2715';
+  nav.title = c ? 'Show the ZIP list' : 'Hide the ZIP list';
   setTimeout(() => map.invalidateSize(), 280);
 };
 if (window.innerWidth < 820) nav.onclick();
