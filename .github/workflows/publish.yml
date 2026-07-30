@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write      # to commit a newly learned column layout back to the repo
   pages: write
   id-token: write
 
@@ -97,23 +97,39 @@ jobs:
         if: always()
         run: cat report.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
 
-      # If a layout was learned this run, surface it. schemas.json needs
-      # committing so the next run doesn't pay to learn the same thing again.
-      - name: Note any newly learned layout
-        if: always()
+      # A layout resolved this run is committed back automatically, so the same
+      # format is never paid for twice and nobody has to notice a summary section
+      # and hand-paste JSON. Only reached when the gate passed, so a mapping that
+      # produced unpublishable output is never memorialized.
+      #
+      # [skip ci] keeps this commit from triggering another run: the path filter
+      # watches pipeline/**, and without it every learned layout would cause one
+      # extra no-op build.
+      - name: Remember any newly learned layout
         run: |
-          if ! git diff --quiet -- pipeline/schemas.json; then
-            {
-              echo ""
-              echo "### A new column layout was learned"
-              echo ""
-              echo "\`pipeline/schemas.json\` changed during this run. Commit it so"
-              echo "the layout is recognized directly next time:"
-              echo ""
-              echo '```diff'
-              git diff -- pipeline/schemas.json
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
+          if git diff --quiet -- pipeline/schemas.json; then
+            echo "No new layout this run."
+            exit 0
+          fi
+          {
+            echo ""
+            echo "### A new column layout was learned"
+            echo ""
+            echo '```diff'
+            git diff -- pipeline/schemas.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pipeline/schemas.json
+          git commit -m 'Learn new column layout [skip ci]'
+          if git push; then
+            echo "Committed the new layout. It will be recognized directly from now on."
+          else
+            echo "COULD NOT PUSH the learned layout." >> "$GITHUB_STEP_SUMMARY"
+            echo "The maps published fine, but this format will be resolved again" \
+              "next time. Copy the diff above into pipeline/schemas.json by hand." \
+              >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # Crawling is allowed so the noindex meta tag in each map can be read --
