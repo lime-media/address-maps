@@ -134,6 +134,8 @@ def main():
     ap.add_argument("--report", default=None, help="write a markdown report here")
     ap.add_argument("--base-url", default=None,
                     help="Pages base URL, so the report can list the map links")
+    ap.add_argument("--status-json", default=None,
+                    help="also write machine-readable results here (deploy with the maps)")
     a = ap.parse_args()
 
     files = sorted(glob.glob(os.path.join(a.workdir, "*", "*_addresses_final.csv")))
@@ -197,6 +199,40 @@ def main():
     if a.report:
         with open(a.report, "w") as f:
             f.write(text + "\n")
+
+    # Machine-readable twin of the report, deployed with the maps so anything
+    # downstream can read results without a token. Carries the commit SHA so a
+    # reader can tell this run's results from a previous run's.
+    if a.status_json:
+        base = (a.base_url or "").rstrip("/") + "/" if a.base_url else ""
+        status = {
+            "generated": __import__("datetime").datetime.now(
+                __import__("datetime").timezone.utc).isoformat(timespec="seconds"),
+            "commit": os.environ.get("GITHUB_SHA", ""),
+            "run_url": (f"{os.environ['GITHUB_SERVER_URL']}/"
+                        f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
+                        f"{os.environ['GITHUB_RUN_ID']}")
+            if os.environ.get("GITHUB_RUN_ID") else "",
+            "ok": not bad,
+            "base": base,
+            "markets": [{
+                "market": r["market"],
+                "slug": r["market"].lower().replace("_", "-"),
+                "url": base + r["market"].lower().replace("_", "-") + "/",
+                "addresses": r["n"],
+                "mapped": r["mapped"],
+                "held_out": r["held"],
+                "zips": r["zips"],
+                "state": r["state"],
+                "status": "failed" if r["fail"] else ("check" if r["warn"] else "ok"),
+                "notes": r["fail"] + r["warn"],
+            } for r in results],
+        }
+        os.makedirs(os.path.dirname(a.status_json) or ".", exist_ok=True)
+        with open(a.status_json, "w") as f:
+            __import__("json").dump(status, f, indent=2)
+            f.write("\n")
+
     return 1 if bad else 0
 
 
