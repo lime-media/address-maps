@@ -88,7 +88,8 @@ jobs:
         run: |
           # project-pages URL: https://<owner>.github.io/<repo>/
           BASE="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/"
-          python3 pipeline/validate.py work/ --report report.md --base-url "$BASE"
+          python3 pipeline/validate.py work/ --report report.md --base-url "$BASE" \
+            --status-json site/status.json
 
       # Runs even on failure, so the person who uploaded sees why in plain English
       # on the run page rather than having to read a log.
