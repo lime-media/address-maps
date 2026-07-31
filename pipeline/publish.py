@@ -118,6 +118,20 @@ def survey(xlsx, learn):
     return out
 
 
+def explain_unreadable(path, err):
+    """Turn a library exception into something an uploader can act on."""
+    import zipfile
+    name = os.path.basename(path)
+    if isinstance(err, zipfile.BadZipFile):
+        return (f"{name} is not a real spreadsheet file. The name ends in "
+                f".xlsx but the contents are something else -- most often a "
+                f"Google Sheet, or a PDF that got renamed. Open it, then "
+                f"File > Download > Microsoft Excel (.xlsx), and upload that.")
+    if isinstance(err, KeyError):
+        return f"{name}: expected sheet is missing ({err})"
+    return f"{name}: {type(err).__name__}: {err}"
+
+
 def qa_summary(final_csv):
     import csv
     counts, zips = {}, set()
@@ -205,10 +219,17 @@ def main():
     os.makedirs(work, exist_ok=True)
     learn = bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
 
-    built, failed, seen = [], [], {}
+    built, failed, unreadable, seen = [], [], [], {}
     for path in paths:
-        print(f"\nreading {os.path.basename(path)}")
-        tabs = survey(os.path.abspath(path), learn)
+        name = os.path.basename(path)
+        print(f"\nreading {name}")
+        try:
+            tabs = survey(os.path.abspath(path), learn)
+        except Exception as e:
+            why = explain_unreadable(path, e)
+            print(f"  ! cannot read this file, skipped -- {why}")
+            unreadable.append({"file": name, "reason": why})
+            continue
         if a.tabs:
             want = {t.strip().lower() for t in a.tabs}
             tabs = [t for t in tabs if t[0].strip().lower() in want]
@@ -230,10 +251,15 @@ def main():
                 print(f"\n  ! {tab}: build failed, skipped -- {e}")
                 failed.append((tab, str(e)))
 
-    if failed:
+    if unreadable:
+        with open(os.path.join(work, "_unreadable.json"), "w") as f:
+            __import__("json").dump(unreadable, f, indent=2)
+    if failed or unreadable:
         print("\n" + "-" * 62)
         for tab, why in failed:
             print(f"FAILED  {tab}: {why}")
+        for u in unreadable:
+            print(f"SKIPPED {u['file']}")
     if not built:
         raise SystemExit("nothing built")
     print("\n" + "-" * 62)
