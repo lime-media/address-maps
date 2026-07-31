@@ -57,7 +57,45 @@ def titleize(tab):
     return f"{words} ({code})" if code else words
 
 
+DELIMS = {".tsv": "\t", ".csv": ",", ".txt": ","}
+
+
+def is_flat(path):
+    """A single-table file (csv/tsv/txt) rather than a workbook of tabs."""
+    return os.path.splitext(path)[1].lower() in DELIMS
+
+
+def read_headers_flat(path):
+    """Headers, row count and modal state for a csv/tsv. There are no tabs, so
+    the market name comes from the filename instead."""
+    import csv as _csv
+    delim = DELIMS[os.path.splitext(path)[1].lower()]
+    with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+        rd = _csv.reader(f, delimiter=delim)
+        headers = []
+        for row in rd:
+            if row and sum(1 for c in row if str(c).strip()) >= 2:
+                headers = [str(c or "").strip() for c in row]
+                break
+        if not headers:
+            return [], 0, ""
+        norm = [re.sub(r"[^A-Z0-9]", "", h.upper()) for h in headers]
+        si = next((i for i, x in enumerate(norm)
+                   if x in ("TSTATE", "STATE", "SERVICESTATE", "SERVICESTATECD")), None)
+        n, states = 0, {}
+        for row in rd:
+            if not row or all(not str(c).strip() for c in row):
+                continue
+            n += 1
+            if si is not None and si < len(row) and row[si]:
+                v = str(row[si]).strip().upper()[:2]
+                states[v] = states.get(v, 0) + 1
+    return headers, n, (max(states, key=states.get) if states else "")
+
+
 def read_headers(xlsx, tab):
+    if is_flat(xlsx):
+        return read_headers_flat(xlsx)
     import openpyxl
     wb = openpyxl.load_workbook(xlsx, read_only=True, data_only=True)
     ws = wb[tab]
@@ -85,10 +123,14 @@ def read_headers(xlsx, tab):
 def survey(xlsx, learn):
     """Return [(tab, rows, state, schema)] for tabs holding addresses. Learns an
     unknown layout via resolve_schema.py when a key is available."""
-    import openpyxl
-    wb = openpyxl.load_workbook(xlsx, read_only=True, data_only=True)
-    names = [ws.title for ws in wb.worksheets]
-    wb.close()
+    if is_flat(xlsx):
+        # one table, so one market, named from the file
+        names = [os.path.splitext(os.path.basename(xlsx))[0]]
+    else:
+        import openpyxl
+        wb = openpyxl.load_workbook(xlsx, read_only=True, data_only=True)
+        names = [ws.title for ws in wb.worksheets]
+        wb.close()
 
     out = []
     for tab in names:
@@ -219,7 +261,7 @@ def main():
     os.makedirs(work, exist_ok=True)
     learn = bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
 
-    built, failed, unreadable, seen = [], [], [], {}
+    built, failed, unreadable, seen, sources = [], [], [], {}, {}
     for path in paths:
         name = os.path.basename(path)
         print(f"\nreading {name}")
@@ -246,11 +288,14 @@ def main():
                 slug, qa = build_market(os.path.abspath(path), tab, state,
                                         work, site, a.with_csv)
                 built.append((tab, slug, qa))
+                sources[slug] = name
             except SystemExit as e:
                 # one unusable market must not take the others down with it
                 print(f"\n  ! {tab}: build failed, skipped -- {e}")
                 failed.append((tab, str(e)))
 
+    with open(os.path.join(work, "_sources.json"), "w") as f:
+        __import__("json").dump(sources, f, indent=2)
     if unreadable:
         with open(os.path.join(work, "_unreadable.json"), "w") as f:
             __import__("json").dump(unreadable, f, indent=2)
