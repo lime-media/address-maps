@@ -146,6 +146,17 @@ def main():
     results = [check(f) for f in files]
     bad = [r for r in results if r["fail"]]
 
+    # files publish.py could not open at all -- they produced no market, so they
+    # would otherwise be invisible to anyone reading only the summary
+    unreadable = []
+    upath = os.path.join(a.workdir, "_unreadable.json")
+    if os.path.exists(upath):
+        try:
+            with open(upath) as f:
+                unreadable = __import__("json").load(f)
+        except (ValueError, OSError):
+            unreadable = []
+
     out = []
     out.append("## Address maps" + ("" if not bad else " — PUBLISHING BLOCKED"))
     out.append("")
@@ -174,8 +185,20 @@ def main():
             out.append(f"- Worth checking: {w}")
         out.append("")
 
+    if unreadable:
+        out.append("### Files that could not be read")
+        out.append("")
+        for u in unreadable:
+            out.append(f"- **{u['file']}** — {u['reason']}")
+        out.append("")
+        out.append("The markets below published normally. Nothing from the file(s) "
+                   "above is on the map.")
+        out.append("")
+
     if not bad:
-        out.append("Every market passed.")
+        out.append("Every market passed."
+                   + (" One or more files could not be read -- see above."
+                      if unreadable else ""))
 
     if a.base_url:
         base = a.base_url if a.base_url.endswith("/") else a.base_url + "/"
@@ -214,6 +237,7 @@ def main():
                         f"{os.environ['GITHUB_RUN_ID']}")
             if os.environ.get("GITHUB_RUN_ID") else "",
             "ok": not bad,
+            "unreadable": unreadable,
             "base": base,
             "markets": [{
                 "market": r["market"],
