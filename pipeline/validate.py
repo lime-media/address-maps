@@ -148,6 +148,16 @@ def main():
 
     # files publish.py could not open at all -- they produced no market, so they
     # would otherwise be invisible to anyone reading only the summary
+    # slug -> source filename, so a report can be narrowed to one upload
+    sources = {}
+    spath = os.path.join(a.workdir, "_sources.json")
+    if os.path.exists(spath):
+        try:
+            with open(spath) as f:
+                sources = __import__("json").load(f)
+        except (ValueError, OSError):
+            sources = {}
+
     unreadable = []
     upath = os.path.join(a.workdir, "_unreadable.json")
     if os.path.exists(upath):
@@ -248,6 +258,7 @@ def main():
                 "held_out": r["held"],
                 "zips": r["zips"],
                 "state": r["state"],
+                "source": sources.get(r["market"].lower().replace("_", "-"), ""),
                 "status": "failed" if r["fail"] else ("check" if r["warn"] else "ok"),
                 "notes": r["fail"] + r["warn"],
             } for r in results],
