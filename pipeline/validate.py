@@ -139,6 +139,25 @@ def main():
     a = ap.parse_args()
 
     files = sorted(glob.glob(os.path.join(a.workdir, "*", "*_addresses_final.csv")))
+
+    # Restrict to the markets this run actually built. Without this, a cached
+    # work/ directory makes long-retired markets reappear in the report and in
+    # status.json, with links that 404.
+    bpath = os.path.join(a.workdir, "_built.json")
+    if os.path.exists(bpath):
+        try:
+            with open(bpath) as f:
+                built = set(__import__("json").load(f))
+            kept = [p for p in files
+                    if os.path.basename(os.path.dirname(p)) in built]
+            dropped = len(files) - len(kept)
+            if dropped:
+                print(f"ignoring {dropped} market(s) left over in {a.workdir} "
+                      f"from earlier runs", file=sys.stderr)
+            files = kept
+        except (ValueError, OSError):
+            pass
+
     if not files:
         print(f"nothing to validate under {a.workdir}", file=sys.stderr)
         return 1
