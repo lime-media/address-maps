@@ -294,8 +294,26 @@ def main():
                 print(f"\n  ! {tab}: build failed, skipped -- {e}")
                 failed.append((tab, str(e)))
 
+    js = __import__("json")
     with open(os.path.join(work, "_sources.json"), "w") as f:
-        __import__("json").dump(sources, f, indent=2)
+        js.dump(sources, f, indent=2)
+    # work/ is cached between CI runs so geocode checkpoints survive, which means
+    # it holds a directory for every market ever built. Record this run's markets
+    # so validate.py reports on what was actually published rather than on
+    # everything the cache happens to be carrying.
+    with open(os.path.join(work, "_built.json"), "w") as f:
+        js.dump(sorted(sources.keys()), f, indent=2)
+
+    # prune leftovers, so the cache cannot grow without limit. Skipped when only
+    # some tabs were requested, since then the others are absent on purpose.
+    if not a.tabs:
+        live = set(sources)
+        for entry in sorted(os.listdir(work)):
+            d = os.path.join(work, entry)
+            if not os.path.isdir(d) or entry in live:
+                continue
+            shutil.rmtree(d, ignore_errors=True)
+            print(f"  pruned stale work dir: {entry}")
     if unreadable:
         with open(os.path.join(work, "_unreadable.json"), "w") as f:
             __import__("json").dump(unreadable, f, indent=2)
