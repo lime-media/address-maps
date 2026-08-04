@@ -43,18 +43,82 @@ def sh(cmd, cwd=None, check=True, quiet=False):
     return r
 
 
+# ---------------------------------------------------------------- product naming
+# Filenames follow "<date>_<PRODUCT>_Maps & Addresses.xlsx", so the product falls
+# out of the name and never has to be typed. Anything a product folder cannot be
+# derived from lands in "unsorted", which is visible rather than silent.
+DEDUP_SUFFIX = re.compile(r"\s*\(\d+\)\s*$")
+RESPONDENT = re.compile(r"\s+-\s+[A-Za-z]+(?:\s+[A-Za-z]+){0,3}\s*$")
+DATE_PREFIX = re.compile(r"^(?:\d{4}[-_]\d{1,2}|\d{1,2}[-_]\d{2,4})[-_\s]+")
+BOILERPLATE = re.compile(r"[_\s-]*maps?\s*&\s*addresses.*$", re.I)
+
+
+def product_from_filename(path):
+    """8_26_NG OOF_Maps & Addresses (1).xlsx -> ng-oof"""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    for rx in (DEDUP_SUFFIX, RESPONDENT, DEDUP_SUFFIX):
+        stem = rx.sub("", stem)
+    stem = DATE_PREFIX.sub("", stem)
+    stem = BOILERPLATE.sub("", stem)
+    return slugify(stem) or "unsorted"
+
+
+def discover(paths):
+    """[(product, path)] for every spreadsheet given, expanding folders.
+
+    A file inside inbox/<product>/ takes that folder as its product -- the folder
+    is the authority, so a misfiled upload is fixed by moving it. A file sitting
+    at the top of inbox/ has its product inferred from its name instead.
+    """
+    out = []
+    for i in paths:
+        if os.path.isdir(i):
+            for entry in sorted(os.listdir(i)):
+                sub = os.path.join(i, entry)
+                if os.path.isdir(sub):
+                    for f in sorted(os.listdir(sub)):
+                        fp = os.path.join(sub, f)
+                        if os.path.isfile(fp) and is_sheet(fp):
+                            out.append((slugify(entry), fp))
+                elif os.path.isfile(sub) and is_sheet(sub):
+                    out.append((product_from_filename(sub), sub))
+        elif os.path.exists(i):
+            out.append((product_from_filename(i), i))
+        else:
+            raise SystemExit(f"no such file or folder: {i}")
+    return [(p, f) for p, f in out
+            if not os.path.basename(f).startswith("~$")]
+
+
+def is_sheet(path):
+    return os.path.splitext(path)[1].lower() in (".xlsx", ".xlsm", ".xls", ".csv",
+                                                 ".tsv", ".txt")
+
+
 def slugify(tab):
     """534_ORLANDO -> 534-orlando. Keeps the DMA code so the URL is unambiguous
     and matches the tab name in the source file."""
     return re.sub(r"-+", "-", re.sub(r"[^A-Za-z0-9]+", "-", str(tab)).strip("-")).lower()
 
 
-def titleize(tab):
-    """534_ORLANDO -> Orlando (534)"""
+def product_label(product):
+    """ng-oof -> NG OOF"""
+    return " ".join(w.upper() for w in str(product).split("-") if w)
+
+
+def titleize(tab, product=""):
+    """534_ORLANDO -> Orlando (534) -- NG OOF
+
+    The product belongs in the title now: the same city appears under several
+    product lines, and a map with no product on it is indistinguishable from
+    another product's map of the same city.
+    """
     m = re.match(r"^(\d+)[_\s-]+(.*)$", str(tab).strip())
     code, rest = (m.group(1), m.group(2)) if m else ("", str(tab))
     words = " ".join(w.capitalize() for w in re.split(r"[_\s]+", rest) if w)
-    return f"{words} ({code})" if code else words
+    base = f"{words} ({code})" if code else words
+    lab = product_label(product)
+    return f"{base} \u2014 {lab}" if lab and lab != "UNSORTED" else base
 
 
 DELIMS = {".tsv": "\t", ".csv": ",", ".txt": ","}
@@ -186,10 +250,15 @@ def qa_summary(final_csv):
             "mapped": sum(counts.values()) - held}
 
 
-def build_market(xlsx, tab, state, work, site, with_csv):
-    slug = slugify(tab)
-    name = slug.replace("-", "_").upper()
-    dest, wdir = os.path.join(site, slug), os.path.join(work, slug)
+def build_market(xlsx, tab, state, work, site, with_csv, product=""):
+    # URL is <product>/<market>, so two products can carry the same DMA tab and
+    # stay separate maps. The work directory flattens that with "__", because a
+    # slash there would create nesting the pruning logic would have to walk.
+    tab_slug = slugify(tab)
+    slug = f"{product}/{tab_slug}" if product else tab_slug
+    wname = f"{product}__{tab_slug}" if product else tab_slug
+    name = wname.replace("-", "_").replace("__", "_X_").upper()
+    dest, wdir = os.path.join(site, *slug.split("/")), os.path.join(work, wname)
     os.makedirs(wdir, exist_ok=True)
     print(f"  {tab} -> /{slug}/", end="", flush=True)
 
@@ -216,7 +285,8 @@ def build_market(xlsx, tab, state, work, site, with_csv):
     p(*fin)
 
     final_csv = os.path.join(wdir, f"{name}_addresses_final.csv")
-    p("build_address_map.py", final_csv, "--name", name, "--title", titleize(tab))
+    p("build_address_map.py", final_csv, "--name", name,
+      "--title", titleize(tab, product))
 
     os.makedirs(dest, exist_ok=True)
     shutil.copy(os.path.join(wdir, f"{name}_address_map.html"),
@@ -224,9 +294,9 @@ def build_market(xlsx, tab, state, work, site, with_csv):
     # the audit CSV stays local -- internal record IDs and QA columns don't need
     # to sit on a public URL
     if with_csv:
-        shutil.copy(final_csv, os.path.join(dest, f"{slug}-addresses.csv"))
+        shutil.copy(final_csv, os.path.join(dest, f"{tab_slug}-addresses.csv"))
     print("  done")
-    return slug, qa_summary(final_csv)
+    return slug, wname, qa_summary(final_csv)
 
 
 def main():
@@ -243,18 +313,9 @@ def main():
     global VERBOSE
     VERBOSE = a.verbose
 
-    paths = []
-    for i in (a.inputs or ["inbox"]):
-        if os.path.isdir(i):
-            for ext in ("xlsx", "xlsm", "xls", "csv"):
-                paths += sorted(glob.glob(os.path.join(i, f"*.{ext}")))
-        elif os.path.exists(i):
-            paths.append(i)
-        else:
-            raise SystemExit(f"no such file or folder: {i}")
-    paths = [p for p in paths if not os.path.basename(p).startswith("~$")]
-    if not paths:
-        raise SystemExit("no spreadsheets found -- put one in inbox/")
+    found = discover(a.inputs or ["inbox"])
+    if not found:
+        raise SystemExit("no spreadsheets found -- put one in inbox/<product>/")
 
     site, work = os.path.abspath(a.site), os.path.abspath(a.work)
     os.makedirs(site, exist_ok=True)
@@ -262,9 +323,9 @@ def main():
     learn = bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
 
     built, failed, unreadable, seen, sources = [], [], [], {}, {}
-    for path in paths:
+    for product, path in found:
         name = os.path.basename(path)
-        print(f"\nreading {name}")
+        print(f"\nreading {product}/{name}")
         try:
             tabs = survey(os.path.abspath(path), learn)
         except Exception as e:
@@ -280,15 +341,15 @@ def main():
             continue
         print("  " + ", ".join(f"{t}({n:,}, {s})" for t, n, _, s in tabs))
         for tab, _, state, _ in tabs:
-            slug = slugify(tab)
-            if slug in seen:
-                print(f"  {tab}: also in {seen[slug]} -- this file wins")
-            seen[slug] = os.path.basename(path)
+            key = f"{product}/{slugify(tab)}"
+            if key in seen:
+                print(f"  {tab}: also in {seen[key]} -- this file wins")
+            seen[key] = name
             try:
-                slug, qa = build_market(os.path.abspath(path), tab, state,
-                                        work, site, a.with_csv)
+                slug, wname, qa = build_market(os.path.abspath(path), tab, state,
+                                               work, site, a.with_csv, product)
                 built.append((tab, slug, qa))
-                sources[slug] = name
+                sources[wname] = name
             except SystemExit as e:
                 # one unusable market must not take the others down with it
                 print(f"\n  ! {tab}: build failed, skipped -- {e}")
