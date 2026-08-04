@@ -68,13 +68,19 @@ BOX = {
 }
 
 
+def slug_from_workdir(name):
+    """work dir "<product>__<tab>" -> URL path "<product>/<tab>"."""
+    return name.replace("__", "/")
+
+
 def check(final_csv):
     rows = list(csv.DictReader(open(final_csv)))
     if not rows:
         return {"market": os.path.basename(final_csv), "fail": ["file is empty"],
                 "warn": [], "n": 0, "mapped": 0}
 
-    market = os.path.basename(final_csv).replace("_addresses_final.csv", "")
+    workdir = os.path.basename(os.path.dirname(final_csv))
+    market = workdir
     flags = Counter(r["qa_flag"] for r in rows)
     held = flags["NO_MATCH"] + flags["FAR_FROM_ZIP_SEVERE"]
     mapped = [r for r in rows if r["lat"] and r["qa_flag"] not in
@@ -123,7 +129,8 @@ def check(final_csv):
         warn.append("more than one state on this tab: " + ", ".join(
             f"{s} ({n:,})" for s, n in states.most_common(4)))
 
-    return {"market": market, "n": len(rows), "mapped": len(mapped), "held": held,
+    return {"market": market, "slug": slug_from_workdir(market),
+            "n": len(rows), "mapped": len(mapped), "held": held,
             "zips": len(zips), "state": state, "fail": fail, "warn": warn,
             "cities": cities.most_common(3), "rate": rate}
 
@@ -242,9 +249,9 @@ def main():
                        "embed in Google Sites only needs setting up once:")
         out.append("")
         for r in results:
-            slug = r["market"].lower().replace("_", "-")
+            slug = r["slug"]
             note = " — failed this run, showing older data" if r["fail"] else ""
-            out.append(f"- [{r['market']}]({base}{slug}/) — {base}{slug}/{note}")
+            out.append(f"- [{r['slug']}]({base}{slug}/) — {base}{slug}/{note}")
 
     text = "\n".join(out)
     print(text)
@@ -270,14 +277,14 @@ def main():
             "base": base,
             "markets": [{
                 "market": r["market"],
-                "slug": r["market"].lower().replace("_", "-"),
-                "url": base + r["market"].lower().replace("_", "-") + "/",
+                "slug": r["slug"],
+                "url": base + r["slug"] + "/",
                 "addresses": r["n"],
                 "mapped": r["mapped"],
                 "held_out": r["held"],
                 "zips": r["zips"],
                 "state": r["state"],
-                "source": sources.get(r["market"].lower().replace("_", "-"), ""),
+                "source": sources.get(r["market"], ""),
                 "status": "failed" if r["fail"] else ("check" if r["warn"] else "ok"),
                 "notes": r["fail"] + r["warn"],
             } for r in results],
