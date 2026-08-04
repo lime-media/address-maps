@@ -43,7 +43,7 @@ jobs:
           # `ls a.xlsx b.csv` exits non-zero if EITHER is absent, so testing
           # several extensions with one ls reports "missing" whenever any one of
           # them is missing. find, then check we got at least one hit.
-          found=$(find inbox -maxdepth 1 -type f \
+          found=$(find inbox -type f \
             \( -iname '*.xlsx' -o -iname '*.xlsm' -o -iname '*.xls' -o -iname '*.csv' \) \
             -not -name '~$*' 2>/dev/null | wc -l)
           if [ "$found" -eq 0 ]; then
